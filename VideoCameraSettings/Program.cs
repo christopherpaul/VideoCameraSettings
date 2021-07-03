@@ -1,7 +1,9 @@
 ﻿using AForge.Video.DirectShow;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Windows.Forms;
 
 namespace VideoCameraSettings
 {
@@ -9,77 +11,85 @@ namespace VideoCameraSettings
     {
         static void Main(string[] args)
         {
-            var devices = new FilterInfoCollection(FilterCategory.VideoInputDevice).Cast<FilterInfo>().ToList();
+            string lastMoniker = null;
 
-            FilterInfo chosenDevice = null;
-            if (args.Length > 0)
+            var notifyIcon = new NotifyIcon();
+            notifyIcon.Icon = Resources.Camera;
+            notifyIcon.Text = "Video Camera Settings";
+            notifyIcon.Visible = true;
+
+            var contextMenu = new ContextMenuStrip();
+            contextMenu.Opening += (sender, e) =>
             {
-                chosenDevice = devices.FirstOrDefault(d => d.MonikerString.Equals(args[0], StringComparison.OrdinalIgnoreCase))
-                    ?? devices.FirstOrDefault(d => d.Name.Equals(args[0], StringComparison.OrdinalIgnoreCase));
+                PopulateContextMenu();
+                e.Cancel = false;
+            };
+            notifyIcon.ContextMenuStrip = contextMenu;
+            notifyIcon.DoubleClick += (sender, e) => ShowDefaultDeviceSettings();
 
-                if (chosenDevice == null)
-                {
-                    Console.Error.WriteLine($"Could not find video camera device called '{args[0]}'");
-                }
-            }
+            Application.Run();
 
-            if (chosenDevice == null)
+            void PopulateContextMenu()
             {
-                if (devices.Count == 0)
-                {
-                    Console.Error.WriteLine("No video camera devices found.");
-                    return;
-                }
+                Debug.WriteLine("Populating context menu");
+                contextMenu.Items.Clear();
 
-                if (devices.Count == 1)
+                var header = new ToolStripLabel { Text = "Video Cameras" };
+                header.Font = new System.Drawing.Font(Control.DefaultFont, System.Drawing.FontStyle.Bold);
+                contextMenu.Items.Add(header);
+
+                var devices = GetDevices();
+                if (devices.Any())
                 {
-                    chosenDevice = devices[0];
+                    foreach (var device in devices)
+                    {
+                        var deviceItem = new ToolStripMenuItem { Text = device.Name };
+                        deviceItem.Click += (sender, e) => ShowDeviceSettings(device);
+                        contextMenu.Items.Add(deviceItem);
+                    }
                 }
                 else
                 {
-                    Console.WriteLine($"Found {devices.Count} video camera devices:");
-                    for (int i = 0; i < devices.Count; i++)
-                    {
-                        var d = devices[i];
-                        Console.WriteLine($"[{i + 1}] {d.Name}");
-                    }
+                    contextMenu.Items.Add(new ToolStripLabel { Text = "No cameras found" });
+                }
 
-                    Console.WriteLine("Enter device number:");
-                    do
-                    {
-                        Console.Write("> ");
-                        string input = Console.ReadLine();
-                        if (string.IsNullOrWhiteSpace(input))
-                        {
-                            return;
-                        }
+                contextMenu.Items.Add(new ToolStripSeparator());
 
-                        if (int.TryParse(input, out int chosenNumber) && chosenNumber >= 1 && chosenNumber <= devices.Count)
-                        {
-                            chosenDevice = devices[chosenNumber - 1];
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Please enter a number from 1 to {devices.Count}, or press enter to quit");
-                        }
-                    }
-                    while (chosenDevice == null);
+                var exitItem = new ToolStripMenuItem { Text = "Exit" };
+                exitItem.Click += (sender, e) => Application.Exit();
+                contextMenu.Items.Add(exitItem);
+            }
+
+            List<FilterInfo> GetDevices()
+            {
+                return new FilterInfoCollection(FilterCategory.VideoInputDevice).Cast<FilterInfo>().ToList();
+            }
+
+            void ShowDefaultDeviceSettings()
+            {
+                var devices = GetDevices();
+                var defaultDevice = devices.FirstOrDefault(d => d.MonikerString == lastMoniker) ??
+                    devices.FirstOrDefault();
+
+                if (defaultDevice != null)
+                {
+                    ShowDeviceSettings(defaultDevice);
                 }
             }
 
-            try
+            void ShowDeviceSettings(FilterInfo chosenDevice)
             {
-                var device = new VideoCaptureDevice(chosenDevice.MonikerString);
-                device.DisplayPropertyPage(IntPtr.Zero);
+                lastMoniker = chosenDevice.MonikerString;
 
-                bool hasUniqueName = devices.Count(d => d.Name.Equals(chosenDevice.Name, StringComparison.OrdinalIgnoreCase)) == 1;
-
-                Console.WriteLine("To show these settings again, you can use the command:");
-                Console.WriteLine($@"{Process.GetCurrentProcess().ProcessName} ""{(hasUniqueName ? chosenDevice.Name : chosenDevice.MonikerString)}""");
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Could not show camera properties: {ex.Message}");
+                try
+                {
+                    var device = new VideoCaptureDevice(chosenDevice.MonikerString);
+                    device.DisplayPropertyPage(IntPtr.Zero);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Could not show camera properties: {ex.Message}", "Video Camera Settings");
+                }
             }
         }
     }
